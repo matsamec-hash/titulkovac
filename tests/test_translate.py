@@ -17,17 +17,35 @@ def test_translate_cues_fills_translations_and_keeps_times():
 
 
 def test_translate_cues_relayouts_long_translation():
+    # preklad delsi nez jeden radek se zalomi do 2 radku dle pravidel
     cues = [Cue(index=1, start=0.0, end=5.0, text="x")]
     rules = SegmentRules(max_chars_per_line=10, max_lines=2, max_cps=99.0)
 
     class LongTranslator:
         def translate(self, cues, target_lang):
-            return ["jedna dve tri ctyri pet"]
+            return ["jedna dve tri ctyri"]  # 19 znaku -> 2 radky po <=10
 
     out = translate_cues(cues, LongTranslator(), ["en"], rules)
     en = out[0].translations["en"]
     assert "\n" in en
+    # NIKDY vic nez 2 radky (titulkarska norma)
+    assert len(en.split("\n")) <= 2
     assert all(len(ln) <= 10 for ln in en.split("\n"))
+
+
+def test_translate_cues_never_exceeds_two_lines_even_when_overlong():
+    # preklad, ktery se do 2x max_chars nevejde: zustane 2 radky (best-effort),
+    # NESMI vzniknout 3+ radkovy titulek
+    cues = [Cue(index=1, start=0.0, end=5.0, text="x")]
+    rules = SegmentRules(max_chars_per_line=10, max_lines=2, max_cps=99.0)
+
+    class TooLongTranslator:
+        def translate(self, cues, target_lang):
+            return ["jedna dve tri ctyri pet sest"]  # nevejde se do 2x10
+
+    out = translate_cues(cues, TooLongTranslator(), ["en"], rules)
+    en = out[0].translations["en"]
+    assert len(en.split("\n")) <= 2
 
 
 def test_translate_cues_multiple_languages():
