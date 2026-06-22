@@ -1,14 +1,17 @@
 from __future__ import annotations
 
+import asyncio
+import queue as _queue
 from contextlib import asynccontextmanager
 
-from fastapi import FastAPI, File, Form, HTTPException, UploadFile
+from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
 
 from titulkovac.export import to_srt, to_vtt
 from titulkovac.models import Cue
 from titulkovac.persistence import load_cues, save_cues
 from titulkovac.web.jobs import JobManager, JobStore
+from titulkovac.web.progress import ProgressEvent
 from titulkovac.web.schemas import CueOut, CuePatch, JobOut
 
 
@@ -31,6 +34,15 @@ def _require_job(store: JobStore, job_id: str):
 
 
 def create_app(store: JobStore, manager: JobManager) -> FastAPI:
+    # Hub: per-job seznam thread-safe front, do kterych publikuje listener.
+    subscribers: dict[str, list["_queue.Queue[dict]"]] = {}
+
+    def _publish(ev: ProgressEvent) -> None:
+        for q in list(subscribers.get(ev.job_id, [])):
+            q.put({"step": ev.step, "pct": ev.pct})
+
+    manager.listener = _publish
+
     @asynccontextmanager
     async def lifespan(app: FastAPI):
         manager.start()
@@ -99,5 +111,21 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
         render_lang = None if lang == "cs" else lang
         render = to_vtt if format == "vtt" else to_srt
         return render(cues, render_lang)
+
+    @app.websocket("/api/jobs/{job_id}/progress")
+    async def progress_ws(websocket: WebSocket, job_id: str) -> None:
+        await websocket.accept()
+        q: "_queue.Queue[dict]" = _queue.Queue()
+        subscribers.setdefault(job_id, []).append(q)
+        try:
+            while True:
+                msg = await asyncio.get_event_loop().run_in_executor(None, q.get)
+                await websocket.send_json(msg)
+                if msg["step"] in ("done", "error"):
+                    break
+        except WebSocketDisconnect:
+            pass
+        finally:
+            subscribers.get(job_id, []).remove(q)
 
     return app
