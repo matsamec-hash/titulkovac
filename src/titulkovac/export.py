@@ -28,3 +28,19 @@ def to_srt(cues: list[Cue], lang: str | None = None) -> str:
         text = _text_for(cue, lang)
         blocks.append(f"{i}\n{ts}\n{text}\n")
     return "\n".join(blocks)
+
+
+def format_timestamp_vtt(seconds: float) -> str:
+    """Sekundy -> 'HH:MM:SS.mmm' (WebVTT pouziva tecku)."""
+    return format_timestamp(seconds).replace(",", ".")
+
+
+def to_vtt(cues: list[Cue], lang: str | None = None) -> str:
+    """Vyrenderuje cues do WebVTT."""
+    blocks: list[str] = ["WEBVTT\n"]
+    for cue in cues:
+        ts = (f"{format_timestamp_vtt(cue.start)} --> "
+              f"{format_timestamp_vtt(cue.end)}")
+        text = _text_for(cue, lang)
+        blocks.append(f"{ts}\n{text}\n")
+    return "\n".join(blocks)
