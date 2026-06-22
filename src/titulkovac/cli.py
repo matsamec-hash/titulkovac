@@ -23,6 +23,10 @@ def titulkuj(
     device: str = typer.Option("cuda", help="cuda nebo cpu."),
 ) -> None:
     """Zpracuje soubor a vyrobi titulky v cestine + cilovych jazycich."""
+    if format not in ("srt", "vtt"):
+        raise typer.BadParameter("format musi byt 'srt' nebo 'vtt'.")
+    if device not in ("cuda", "cpu"):
+        raise typer.BadParameter("device musi byt 'cuda' nebo 'cpu'.")
     data = json.loads(config_file.read_text("utf-8")) if config_file else {}
     data.setdefault("target_languages", [j.strip() for j in jazyky.split(",")])
     cfg = AppConfig.from_dict(data)

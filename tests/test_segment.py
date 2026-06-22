@@ -13,6 +13,13 @@ def test_split_words_by_boundaries():
     assert [[w.text for w in g] for g in groups] == [["a", "b"], ["c", "d"]]
 
 
+def test_split_words_by_boundaries_ignores_invalid_and_duplicates():
+    ws = _words(("a", 0, 1), ("b", 1, 2), ("c", 2, 3))
+    # 0 a >=len jsou neplatne, duplikaty se sloucni, na poradi nezalezi
+    groups = split_words_by_boundaries(ws, [0, 2, 2, 3, 99, -1])
+    assert [[w.text for w in g] for g in groups] == [["a", "b"], ["c"]]
+
+
 def test_build_cues_uses_boundaries_and_word_times():
     ws = _words(("Dobry", 0.0, 0.4), ("den", 0.4, 0.8),
                 ("vespolek", 1.0, 1.6))

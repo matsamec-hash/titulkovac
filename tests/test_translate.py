@@ -1,6 +1,20 @@
+import pytest
+
 from titulkovac.models import Cue, SegmentRules
 from titulkovac.translate import translate_cues
 from tests.fakes import FakeTranslator
+
+
+def test_translate_cues_raises_on_count_mismatch():
+    cues = [Cue(index=1, start=0.0, end=1.0, text="a"),
+            Cue(index=2, start=1.0, end=2.0, text="b")]
+
+    class BadTranslator:
+        def translate(self, cues, target_lang):
+            return ["jen jeden"]  # vrati min nez je cues
+
+    with pytest.raises(ValueError):
+        translate_cues(cues, BadTranslator(), ["en"], SegmentRules())
 
 
 def test_translate_cues_fills_translations_and_keeps_times():

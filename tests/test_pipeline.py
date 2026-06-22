@@ -54,3 +54,56 @@ def test_run_pipeline_resumes_transcription(tmp_path):
         translator=FakeTranslator(),
     )
     assert len(cues) == 1
+
+
+def test_run_pipeline_resumes_after_segment(tmp_path):
+    # hotovy transcribe i segment -> boundary_provider se NESMI volat
+    from titulkovac.persistence import save_words, save_cues, mark_step
+    from titulkovac.models import Cue
+    words = [Word(text="Ahoj", start=0.0, end=0.5)]
+    cues_done = [Cue(index=1, start=0.0, end=0.5, text="Ahoj")]
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    save_words(words, job_dir / "words.json")
+    save_cues(cues_done, job_dir / "cues.json")
+    mark_step(job_dir, "transcribe")
+    mark_step(job_dir, "segment")
+
+    class BoomBoundary:
+        def boundaries(self, words):
+            raise AssertionError("boundaries se nemel volat (resume)")
+
+    cfg = AppConfig.from_dict({"target_languages": ["en"]})
+    cues = run_pipeline(
+        audio_path=tmp_path / "fake.wav", job_dir=job_dir, config=cfg,
+        transcriber=FakeTranscriber(words),
+        boundary_provider=BoomBoundary(),
+        translator=FakeTranslator(),
+    )
+    assert cues[0].translations["en"] == "en: Ahoj"
+
+
+def test_run_pipeline_translates_only_missing_language(tmp_path):
+    # cues uz maji "en"; pridavame "de" -> prelozi se jen "de"
+    from titulkovac.persistence import save_words, save_cues, mark_step
+    from titulkovac.models import Cue
+    words = [Word(text="Ahoj", start=0.0, end=0.5)]
+    cues_done = [Cue(index=1, start=0.0, end=0.5, text="Ahoj",
+                     translations={"en": "PUVODNI"})]
+    job_dir = tmp_path / "job"
+    job_dir.mkdir()
+    save_words(words, job_dir / "words.json")
+    save_cues(cues_done, job_dir / "cues.json")
+    mark_step(job_dir, "transcribe")
+    mark_step(job_dir, "segment")
+
+    cfg = AppConfig.from_dict({"target_languages": ["en", "de"]})
+    cues = run_pipeline(
+        audio_path=tmp_path / "fake.wav", job_dir=job_dir, config=cfg,
+        transcriber=FakeTranscriber(words),
+        boundary_provider=FakeBoundaryProvider([]),
+        translator=FakeTranslator(),
+    )
+    # "en" se NEPREKLADAL znovu (zustal puvodni), "de" pribyl
+    assert cues[0].translations["en"] == "PUVODNI"
+    assert cues[0].translations["de"] == "de: Ahoj"
