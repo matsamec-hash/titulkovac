@@ -1,0 +1,13 @@
+# Python
+__pycache__/
+*.py[cod]
+*.egg-info/
+.venv/
+venv/
+
+# Pipeline výstupy a mezikroky
+vystup/
+*.wav
+
+# OS
+.DS_Store
