@@ -72,3 +72,21 @@ testuje deterministicky s fake implementacemi.
 - Překlad delší než 2 řádky × limit znaků zůstane 2řádkový (best-effort) — řeší stručný překlad a
   ruční editace v náhledu (Plán 3).
 - Bez diarizace (rozpoznávání mluvčích).
+
+## Web rozhraní (Plán 2)
+
+```bash
+pip install -e ".[web,transcribe]"
+export ANTHROPIC_API_KEY=sk-ant-...
+export TITULKOVAC_DEVICE=cuda   # nebo cpu
+titulkovac-web                  # bezi na http://127.0.0.1:8000
+```
+
+REST API:
+- `POST /api/jobs` (multipart: `file`, `languages=en,de`) → vytvori a zaradi ulohu
+- `GET /api/jobs` / `GET /api/jobs/{id}` → seznam / stav
+- `GET /api/jobs/{id}/cues` → titulky; `PATCH /api/jobs/{id}/cues/{index}` → editace
+- `GET /api/jobs/{id}/export?lang=cs&format=srt` → stazeni titulku
+- WebSocket `GET /api/jobs/{id}/progress` → JSON `{step, pct}`
+
+Data (nahrane soubory + mezikroky + job.json) jsou v `./data/jobs/` (zmen `TITULKOVAC_DATA`).

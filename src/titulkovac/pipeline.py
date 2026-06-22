@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 from pathlib import Path
+from typing import Callable
 
 from titulkovac.config import AppConfig
 from titulkovac.models import Cue
@@ -11,15 +12,23 @@ from titulkovac.segment import build_cues
 from titulkovac.seams import BoundaryProvider, Transcriber, Translator
 from titulkovac.translate import translate_cues
 
+ProgressCallback = Callable[[str, float], None]
+
 
 def run_pipeline(audio_path: Path, job_dir: Path, config: AppConfig,
                  transcriber: Transcriber, boundary_provider: BoundaryProvider,
-                 translator: Translator) -> list[Cue]:
+                 translator: Translator,
+                 on_progress: ProgressCallback | None = None) -> list[Cue]:
     """Zretezi kroky 2-5. Mezikroky uklada; pri restartu pokracuje od
-    posledniho hotoveho kroku (neprepisuje znovu)."""
+    posledniho hotoveho kroku. on_progress(step, pct) hlasi prubeh."""
+    def report(step: str, pct: float) -> None:
+        if on_progress is not None:
+            on_progress(step, pct)
+
     words_path = job_dir / "words.json"
     cues_path = job_dir / "cues.json"
 
+    report("transcribe", 10.0)
     if step_done(job_dir, "transcribe") and words_path.exists():
         words = load_words(words_path)
     else:
@@ -27,6 +36,7 @@ def run_pipeline(audio_path: Path, job_dir: Path, config: AppConfig,
         save_words(words, words_path)
         mark_step(job_dir, "transcribe")
 
+    report("segment", 60.0)
     if step_done(job_dir, "segment") and cues_path.exists():
         cues = load_cues(cues_path)
     else:
@@ -34,6 +44,7 @@ def run_pipeline(audio_path: Path, job_dir: Path, config: AppConfig,
         save_cues(cues, cues_path)
         mark_step(job_dir, "segment")
 
+    report("translate", 75.0)
     need = [lang for lang in config.target_languages
             if not all(lang in c.translations for c in cues)]
     if need:
@@ -41,4 +52,5 @@ def run_pipeline(audio_path: Path, job_dir: Path, config: AppConfig,
         save_cues(cues, cues_path)
         mark_step(job_dir, "translate")
 
+    report("done", 100.0)
     return cues
