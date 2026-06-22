@@ -55,3 +55,44 @@ def test_split_oversized_splits_at_largest_gap():
     assert all(fits_rules(ch, r) or len(ch) == 1 for ch in chunks)
     flat = [w.text for ch in chunks for w in ch]
     assert flat == ["jed", "dve", "tri"]
+
+
+def test_fits_rules_ignores_min_duration():
+    # kratky titulek (0.3s) s nizkym CPS se MA vejit — min_duration se
+    # vynucuje jinde (v segmentaci), ne v fits_rules
+    r = SegmentRules(max_chars_per_line=42, max_lines=2, max_cps=99.0,
+                     min_duration=1.0)
+    group = _words(("Ahoj", 0.0, 0.3))
+    assert fits_rules(group, r) is True
+
+
+def test_fits_rules_false_when_too_long_duration():
+    r = SegmentRules(max_chars_per_line=42, max_lines=2, max_cps=99.0,
+                     max_duration=7.0)
+    group = _words(("a", 0.0, 8.0))  # 8s > max_duration 7s
+    assert fits_rules(group, r) is False
+
+
+def test_fits_rules_empty_group_is_true():
+    assert fits_rules([], SegmentRules()) is True
+
+
+def test_split_oversized_empty_returns_empty():
+    assert split_oversized([], SegmentRules()) == []
+
+
+def test_split_oversized_terminates_with_zero_gaps():
+    # vsechna slova na sebe tesne navazuji (nulove pauzy) — nesmi zacyklit
+    r = SegmentRules(max_chars_per_line=5, max_lines=1, max_cps=999.0)
+    group = _words(("aa", 0.0, 0.1), ("bb", 0.1, 0.2), ("cc", 0.2, 0.3))
+    chunks = split_oversized(group, r)
+    flat = [w.text for ch in chunks for w in ch]
+    assert flat == ["aa", "bb", "cc"]
+
+
+def test_split_oversized_single_long_word_stops():
+    # jedno prilis dlouhe slovo: base case len==1 zastavi rekurzi
+    r = SegmentRules(max_chars_per_line=3, max_lines=2, max_cps=999.0)
+    group = _words(("dlouhepredlouhe", 0.0, 1.0))
+    chunks = split_oversized(group, r)
+    assert chunks == [group]

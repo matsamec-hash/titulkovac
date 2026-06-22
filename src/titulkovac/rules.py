@@ -4,10 +4,15 @@ from titulkovac.models import SegmentRules, Word
 
 
 def layout_lines(text: str, rules: SegmentRules) -> str:
-    """Zalomi text do <= max_lines radku, kazdy <= max_chars_per_line.
+    """Zalomi text do max. 2 radku, kazdy <= max_chars_per_line.
 
     Zalamuje jen na hranici slova. Hleda nejvyvazenejsi zlom (radky podobne
     dlouhe). Pokud se nevejde, vrati nejlepsi dosazitelne zalomeni.
+
+    POZNAMKA: funkce dela jediny zlom => podporuje max. 2 radky. To odpovida
+    profi titulkarske norme (max 2 radky) a vychozimu SegmentRules.max_lines=2,
+    ktery cela pipeline pouziva. Pro `max_lines > 2` by bylo potreba N-cestne
+    zalamovani (zamerne neimplementovano — YAGNI).
     """
     words = text.split()
     if len(words) <= 1:
@@ -80,6 +85,8 @@ def _largest_gap_index(words: list[Word]) -> int:
 def split_oversized(words: list[Word], rules: SegmentRules) -> list[list[Word]]:
     """Rekurzivne rozdeli prilis dlouhou skupinu na nejvetsich pauzach,
     dokud kazdy kus nevyhovuje pravidlum (nebo neni 1 slovo)."""
+    if not words:
+        return []
     if fits_rules(words, rules) or len(words) == 1:
         return [words]
     i = _largest_gap_index(words)
