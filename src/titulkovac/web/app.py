@@ -3,6 +3,7 @@ from __future__ import annotations
 import asyncio
 import queue as _queue
 from contextlib import asynccontextmanager
+from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import PlainTextResponse
@@ -55,7 +56,9 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
     async def create_job(file: UploadFile = File(...),
                          languages: str = Form("en")) -> JobOut:
         langs = [s.strip() for s in languages.split(",") if s.strip()]
-        rec = store.create(filename=file.filename, languages=langs)
+        # sanitizace: jen zaklad nazvu, zadne ../ ani absolutni cesty
+        safe_name = Path(file.filename or "input").name or "input"
+        rec = store.create(filename=safe_name, languages=langs)
         dest = rec.job_dir / rec.filename
         dest.write_bytes(await file.read())
         manager.enqueue(rec.id)
@@ -112,20 +115,54 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
         render = to_vtt if format == "vtt" else to_srt
         return render(cues, render_lang)
 
+    def _terminal_event(rec) -> dict | None:
+        """Vrati terminalni progress event pokud uloha uz skoncila, jinak None."""
+        if rec is None:
+            return None
+        if rec.status == "done":
+            return {"step": "done", "pct": rec.progress}
+        if rec.status == "error":
+            return {"step": "error", "pct": rec.progress}
+        return None
+
     @app.websocket("/api/jobs/{job_id}/progress")
     async def progress_ws(websocket: WebSocket, job_id: str) -> None:
         await websocket.accept()
         q: "_queue.Queue[dict]" = _queue.Queue()
         subscribers.setdefault(job_id, []).append(q)
+        loop = asyncio.get_event_loop()
         try:
+            # Uloha uz mohla skoncit JESTE NEZ se klient pripojil -> posli
+            # terminalni event hned, jinak by WS visel do nekonecna.
+            try:
+                term = _terminal_event(store.get(job_id))
+            except FileNotFoundError:
+                term = None
+            if term is not None:
+                await websocket.send_json(term)
+                return
             while True:
-                msg = await asyncio.get_event_loop().run_in_executor(None, q.get)
+                try:
+                    msg = await loop.run_in_executor(
+                        None, lambda: q.get(timeout=1.0))
+                except _queue.Empty:
+                    # event mohl utect (race) -> over stav ulohy primo
+                    try:
+                        term = _terminal_event(store.get(job_id))
+                    except FileNotFoundError:
+                        term = None
+                    if term is not None:
+                        await websocket.send_json(term)
+                        break
+                    continue
                 await websocket.send_json(msg)
                 if msg["step"] in ("done", "error"):
                     break
         except WebSocketDisconnect:
             pass
         finally:
-            subscribers.get(job_id, []).remove(q)
+            subs = subscribers.get(job_id, [])
+            if q in subs:
+                subs.remove(q)
 
     return app

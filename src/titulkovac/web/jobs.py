@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import os
 import queue
 import threading
 import uuid
@@ -71,9 +72,14 @@ class JobStore:
         return rec
 
     def _write(self, rec: JobRecord) -> None:
+        # Atomicky zapis (tmp + os.replace), aby soubezny ctenar nikdy nevidel
+        # rozepsany/prazdny job.json (worker thread pise, HTTP handler cte).
         data = {k: v for k, v in asdict(rec).items()}
-        self._meta_path(rec.id).write_text(
-            json.dumps(data, ensure_ascii=False, indent=2), encoding="utf-8")
+        meta = self._meta_path(rec.id)
+        tmp = meta.with_name(meta.name + ".tmp")
+        tmp.write_text(json.dumps(data, ensure_ascii=False, indent=2),
+                       encoding="utf-8")
+        os.replace(tmp, meta)
 
 
 class JobManager:

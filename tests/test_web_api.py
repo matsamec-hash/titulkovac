@@ -109,3 +109,88 @@ def _wait_status(client, job_id, status, timeout=5.0):
             return
         time.sleep(0.02)
     raise AssertionError(f"job {job_id} nedosahl stavu {status}")
+
+
+def test_create_job_sanitizes_filename(tmp_path):
+    captured = {}
+
+    def runner(input_path, job_dir, languages, on_progress):
+        captured["input_path"] = input_path
+        captured["job_dir"] = job_dir
+        on_progress("done", 100.0)
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("../../evil.mp4", io.BytesIO(b"d"),
+                                           "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        _wait_status(client, job_id, "done")
+        # ulozeny nazev je jen zaklad, soubor zustal uvnitr job_dir
+        assert resp.json()["filename"] == "evil.mp4"
+        ip = captured["input_path"].resolve()
+        jd = captured["job_dir"].resolve()
+        assert str(ip).startswith(str(jd))
+
+
+def test_unknown_job_returns_404(tmp_path):
+    client, store = _make_client(tmp_path, lambda *a: None)
+    with client:
+        assert client.get("/api/jobs/neexistuje").status_code == 404
+        assert client.get("/api/jobs/neexistuje/cues").status_code == 404
+
+
+def test_cues_before_done_returns_409(tmp_path):
+    import threading
+    gate = threading.Event()
+
+    def runner(input_path, job_dir, languages, on_progress):
+        gate.wait(timeout=5.0)  # drz ulohu "running"
+        on_progress("done", 100.0)
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        # cues.json jeste neni -> 409
+        assert client.get(f"/api/jobs/{job_id}/cues").status_code == 409
+        gate.set()
+        _wait_status(client, job_id, "done")
+
+
+def test_export_bad_format_returns_400(tmp_path):
+    def runner(input_path, job_dir, languages, on_progress):
+        cues = [Cue(index=1, start=0.0, end=1.0, text="Ahoj")]
+        save_cues(cues, job_dir / "cues.json")
+        on_progress("done", 100.0)
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        _wait_status(client, job_id, "done")
+        assert client.get(
+            f"/api/jobs/{job_id}/export?lang=cs&format=xxx").status_code == 400
+
+
+def test_export_missing_translation_falls_back_to_original(tmp_path):
+    def runner(input_path, job_dir, languages, on_progress):
+        cues = [Cue(index=1, start=0.0, end=1.0, text="Ahoj")]  # bez prekladu
+        save_cues(cues, job_dir / "cues.json")
+        on_progress("done", 100.0)
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        _wait_status(client, job_id, "done")
+        # 'de' chybi -> fallback na originalni text
+        out = client.get(f"/api/jobs/{job_id}/export?lang=de&format=srt")
+        assert "Ahoj" in out.text
