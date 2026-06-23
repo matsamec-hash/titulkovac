@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="cs">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Titulkovač — editor</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <p><a href="/">← zpět na úlohy</a></p>
+  <div class="player">
+    <audio id="audio" controls preload="metadata"></audio>
+    <p>
+      Překlad:
+      <select id="lang"></select>
+      <button id="dl-srt">Stáhnout SRT</button>
+      <button id="dl-vtt">Stáhnout VTT</button>
+      <span id="msg" class="err"></span>
+    </p>
+  </div>
+
+  <table>
+    <thead><tr>
+      <th>#</th><th>start</th><th>end</th><th>text (cs)</th>
+      <th id="th-tr">překlad</th><th>akce</th>
+    </tr></thead>
+    <tbody id="cues"></tbody>
+  </table>
+
+  <script type="module">
+    import { reindex, splitCueAtChar, mergeCues, formatTimecode } from "/cues.js";
+
+    const params = new URLSearchParams(location.search);
+    const jobId = params.get("job");
+    const audio = document.getElementById("audio");
+    const tbody = document.getElementById("cues");
+    const langSel = document.getElementById("lang");
+    const msg = document.getElementById("msg");
+
+    audio.src = `/api/jobs/${jobId}/media`;
+
+    let cues = [];
+    let job = null;
+    let currentLang = null;  // null = jen cs
+
+    async function load() {
+      try {
+        const jr = await fetch(`/api/jobs/${jobId}`);
+        if (!jr.ok) throw new Error(`HTTP ${jr.status}`);
+        job = await jr.json();
+        langSel.innerHTML = `<option value="">— (jen cs)</option>` +
+          job.languages.map((l) => `<option value="${l}">${l}</option>`).join("");
+        if (job.languages.length) { langSel.value = job.languages[0]; currentLang = job.languages[0]; }
+        const cr = await fetch(`/api/jobs/${jobId}/cues`);
+        if (!cr.ok) { msg.textContent = `Titulky nejsou hotové (${cr.status})`; return; }
+        cues = await cr.json();
+        render();
+      } catch (e) {
+        msg.textContent = "Nepodařilo se načíst úlohu (běží server?).";
+      }
+    }
+
+    function render() {
+      document.getElementById("th-tr").textContent =
+        currentLang ? `překlad (${currentLang})` : "překlad";
+      tbody.innerHTML = "";
+      cues.forEach((cue, i) => tbody.appendChild(rowFor(cue, i)));
+    }
+
+    function rowFor(cue, i) {
+      const tr = document.createElement("tr");
+      tr.dataset.index = cue.index;
+      if (cue.edited) tr.classList.add("edited");
+      tr.innerHTML = `
+        <td>${cue.index}</td>
+        <td class="tc">${formatTimecode(cue.start)}</td>
+        <td class="tc">${formatTimecode(cue.end)}</td>
+        <td><textarea class="cell" rows="2" data-field="text">${escapeHtml(cue.text)}</textarea></td>
+        <td><textarea class="cell" rows="2" data-field="tr"
+             ${currentLang ? "" : "disabled"}>${escapeHtml(currentLang ? (cue.translations[currentLang] || "") : "")}</textarea></td>
+        <td>
+          <button data-act="split">rozdělit</button>
+          <button data-act="merge">sloučit ↓</button>
+        </td>`;
+      tr.querySelectorAll("td.tc").forEach((td) =>
+        td.addEventListener("click", () => { audio.currentTime = cue.start; audio.play(); }));
+      const textArea = tr.querySelector('[data-field="text"]');
+      textArea.addEventListener("change", () => patchCue(cue.index, { text: textArea.value }, i, "text", textArea.value));
+      const trArea = tr.querySelector('[data-field="tr"]');
+      if (currentLang) {
+        trArea.addEventListener("change", () =>
+          patchCue(cue.index, { translations: { [currentLang]: trArea.value } }, i, "tr", trArea.value));
+      }
+      tr.querySelector('[data-act="split"]').addEventListener("click", () => doSplit(i, textArea));
+      tr.querySelector('[data-act="merge"]').addEventListener("click", () => doMerge(i));
+      return tr;
+    }
+
+    async function patchCue(index, patch, i, field, value) {
+      const r = await fetch(`/api/jobs/${jobId}/cues/${index}`, {
+        method: "PATCH", headers: { "content-type": "application/json" },
+        body: JSON.stringify(patch),
+      });
+      if (!r.ok) { msg.textContent = `PATCH chyba ${r.status}`; return; }
+      msg.textContent = "";
+      if (field === "text") cues[i].text = value;
+      else cues[i].translations[currentLang] = value;
+      cues[i].edited = true;
+    }
+
+    async function putAll() {
+      cues = reindex(cues);
+      const r = await fetch(`/api/jobs/${jobId}/cues`, {
+        method: "PUT", headers: { "content-type": "application/json" },
+        body: JSON.stringify(cues),
+      });
+      if (!r.ok) { msg.textContent = `Uložení selhalo (${r.status})`; return; }
+      cues = await r.json();
+      msg.textContent = "";
+      render();
+    }
+
+    function doSplit(i, textArea) {
+      const pos = textArea.selectionStart || Math.floor(cues[i].text.length / 2);
+      const parts = splitCueAtChar(cues[i], pos);
+      if (parts.length < 2) { msg.textContent = "Tady nelze rozdělit (kurzor na okraji?)."; return; }
+      cues.splice(i, 1, parts[0], parts[1]);
+      putAll();
+    }
+
+    function doMerge(i) {
+      if (i + 1 >= cues.length) { msg.textContent = "Není s čím sloučit"; return; }
+      const m = mergeCues(cues[i], cues[i + 1]);
+      cues.splice(i, 2, m);
+      putAll();
+    }
+
+    audio.addEventListener("timeupdate", () => {
+      const t = audio.currentTime;
+      const active = cues.findIndex((c) => t >= c.start && t < c.end);
+      [...tbody.children].forEach((tr, i) => {
+        const on = i === active;
+        tr.classList.toggle("active", on);
+        if (on) tr.scrollIntoView({ block: "nearest" });
+      });
+    });
+
+    langSel.addEventListener("change", () => { currentLang = langSel.value || null; render(); });
+
+    function download(format) {
+      const lang = currentLang || "cs";
+      const url = `/api/jobs/${jobId}/export?lang=${lang}&format=${format}`;
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${job.filename}.${lang}.${format}`;
+      document.body.appendChild(a); a.click(); a.remove();
+    }
+    document.getElementById("dl-srt").addEventListener("click", () => download("srt"));
+    document.getElementById("dl-vtt").addEventListener("click", () => download("vtt"));
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    load();
+  </script>
+</body>
+</html>
