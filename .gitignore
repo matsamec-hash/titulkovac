@@ -11,3 +11,6 @@ vystup/
 
 # OS
 .DS_Store
+
+# API klíč bratránka (NIKDY do gitu!)
+anthropic-klic.txt
