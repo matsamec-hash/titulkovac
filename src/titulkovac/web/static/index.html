@@ -27,6 +27,7 @@
   </fieldset>
 
   <h2>Úlohy</h2>
+  <p id="jobs-msg" class="err"></p>
   <table>
     <thead><tr><th>Soubor</th><th>Jazyky</th><th>Stav</th><th>Průběh</th><th></th></tr></thead>
     <tbody id="jobs"></tbody>
@@ -82,10 +83,17 @@
     }
 
     async function loadJobs() {
-      const r = await fetch("/api/jobs");
-      const jobs = await r.json();
-      jobs.sort((a, b) => a.id < b.id ? 1 : -1);
-      jobs.forEach(renderRow);
+      const msg = document.getElementById("jobs-msg");
+      try {
+        const r = await fetch("/api/jobs");
+        if (!r.ok) throw new Error(`HTTP ${r.status}`);
+        const jobs = await r.json();
+        jobs.sort((a, b) => a.id < b.id ? 1 : -1);
+        jobs.forEach(renderRow);
+        msg.textContent = "";
+      } catch (e) {
+        msg.textContent = "Nepodařilo se načíst úlohy (běží server?). Zkus obnovit stránku.";
+      }
     }
 
     function escapeHtml(s) {
