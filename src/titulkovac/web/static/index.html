@@ -1,5 +1,117 @@
 <!doctype html>
 <html lang="cs">
-<head><meta charset="utf-8"><title>Titulkovač</title></head>
-<body><h1>Titulkovač</h1></body>
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Titulkovač</title>
+  <link rel="stylesheet" href="/style.css">
+</head>
+<body>
+  <h1>Titulkovač</h1>
+
+  <fieldset>
+    <legend>Nová epizoda</legend>
+    <form id="upload-form">
+      <p><input type="file" id="file" required></p>
+      <p>
+        <label><input type="checkbox" checked disabled> CS (originál)</label>
+        <label><input type="checkbox" class="lang" value="en" checked> EN</label>
+        <label><input type="checkbox" class="lang" value="de"> DE</label>
+        <label><input type="checkbox" class="lang" value="pl"> PL</label>
+        <label><input type="checkbox" class="lang" value="es"> ES</label>
+        <label><input type="checkbox" class="lang" value="uk"> UK</label>
+      </p>
+      <button type="submit">Nahrát a zpracovat</button>
+      <span id="upload-msg" class="err"></span>
+    </form>
+  </fieldset>
+
+  <h2>Úlohy</h2>
+  <table>
+    <thead><tr><th>Soubor</th><th>Jazyky</th><th>Stav</th><th>Průběh</th><th></th></tr></thead>
+    <tbody id="jobs"></tbody>
+  </table>
+
+  <script type="module">
+    const tbody = document.getElementById("jobs");
+    const sockets = new Map();      // job_id -> WebSocket
+    const rows = new Map();         // job_id -> <tr>
+
+    function wsUrl(jobId) {
+      const proto = location.protocol === "https:" ? "wss" : "ws";
+      return `${proto}://${location.host}/api/jobs/${jobId}/progress`;
+    }
+
+    function renderRow(job) {
+      let tr = rows.get(job.id);
+      if (!tr) {
+        tr = document.createElement("tr");
+        rows.set(job.id, tr);
+        tbody.prepend(tr);
+      }
+      const done = job.status === "done";
+      const pct = Math.round(job.progress || 0);
+      tr.innerHTML = `
+        <td>${escapeHtml(job.filename)}</td>
+        <td>${job.languages.join(", ")}</td>
+        <td>${job.status === "error"
+              ? `<span class="err">chyba: ${escapeHtml(job.error || "")}</span>`
+              : `${escapeHtml(job.step)}`}</td>
+        <td><div class="progress"><div style="width:${pct}%"></div></div> ${pct}%</td>
+        <td>${done ? `<a href="/editor.html?job=${job.id}"><button>Otevřít editor</button></a>` : ""}</td>`;
+      if (!done && job.status !== "error") subscribe(job.id);
+    }
+
+    function subscribe(jobId) {
+      if (sockets.has(jobId)) return;
+      const ws = new WebSocket(wsUrl(jobId));
+      sockets.set(jobId, ws);
+      ws.onmessage = (ev) => {
+        const msg = JSON.parse(ev.data);   // {step, pct}
+        refreshJob(jobId);                  // znovu nacti plny JobOut
+        if (msg.step === "done" || msg.step === "error") {
+          ws.close(); sockets.delete(jobId);
+        }
+      };
+      ws.onclose = () => sockets.delete(jobId);
+    }
+
+    async function refreshJob(jobId) {
+      const r = await fetch(`/api/jobs/${jobId}`);
+      if (r.ok) renderRow(await r.json());
+    }
+
+    async function loadJobs() {
+      const r = await fetch("/api/jobs");
+      const jobs = await r.json();
+      jobs.sort((a, b) => a.id < b.id ? 1 : -1);
+      jobs.forEach(renderRow);
+    }
+
+    function escapeHtml(s) {
+      return String(s).replace(/[&<>"]/g, (c) =>
+        ({ "&": "&amp;", "<": "&lt;", ">": "&gt;", '"': "&quot;" }[c]));
+    }
+
+    document.getElementById("upload-form").addEventListener("submit", async (e) => {
+      e.preventDefault();
+      const msg = document.getElementById("upload-msg");
+      msg.textContent = "";
+      const file = document.getElementById("file").files[0];
+      if (!file) return;
+      const langs = [...document.querySelectorAll(".lang:checked")]
+        .map((c) => c.value).join(",");
+      const fd = new FormData();
+      fd.append("file", file);
+      fd.append("languages", langs || "en");
+      const r = await fetch("/api/jobs", { method: "POST", body: fd });
+      if (!r.ok) { msg.textContent = `Chyba ${r.status}`; return; }
+      renderRow(await r.json());
+      e.target.reset();
+      document.querySelector('.lang[value="en"]').checked = true;
+    });
+
+    loadJobs();
+  </script>
+</body>
 </html>
