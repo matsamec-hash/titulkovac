@@ -6,7 +6,7 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
 
 from titulkovac.export import to_srt, to_vtt
 from titulkovac.models import Cue
@@ -101,6 +101,15 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
         target.edited = True
         save_cues(cues, cues_path)
         return _cue_out(target)
+
+    @app.get("/api/jobs/{job_id}/media")
+    def get_media(job_id: str) -> FileResponse:
+        rec = _require_job(store, job_id)
+        audio = rec.job_dir / "audio.wav"
+        if not audio.exists():
+            raise HTTPException(404, "audio jeste neni hotove")
+        # Starlette FileResponse resi HTTP Range (206) automaticky.
+        return FileResponse(audio, media_type="audio/wav")
 
     @app.get("/api/jobs/{job_id}/export", response_class=PlainTextResponse)
     def export(job_id: str, lang: str = "cs", format: str = "srt") -> str:

@@ -194,3 +194,42 @@ def test_export_missing_translation_falls_back_to_original(tmp_path):
         # 'de' chybi -> fallback na originalni text
         out = client.get(f"/api/jobs/{job_id}/export?lang=de&format=srt")
         assert "Ahoj" in out.text
+
+
+def test_media_served_with_range(tmp_path):
+    def runner(input_path, job_dir, languages, on_progress):
+        (job_dir / "audio.wav").write_bytes(b"RIFFxxxxWAVE")
+        on_progress("done", 100.0)
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        _wait_status(client, job_id, "done")
+
+        full = client.get(f"/api/jobs/{job_id}/media")
+        assert full.status_code == 200
+        assert full.content == b"RIFFxxxxWAVE"
+        assert full.headers["content-type"].startswith("audio/")
+
+        part = client.get(f"/api/jobs/{job_id}/media",
+                          headers={"Range": "bytes=0-3"})
+        assert part.status_code == 206
+        assert part.content == b"RIFF"
+
+
+def test_media_missing_returns_404(tmp_path):
+    def runner(input_path, job_dir, languages, on_progress):
+        on_progress("done", 100.0)  # audio.wav se nevytvori
+
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        resp = client.post("/api/jobs",
+                           files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                           data={"languages": "en"})
+        job_id = resp.json()["id"]
+        _wait_status(client, job_id, "done")
+        assert client.get(f"/api/jobs/{job_id}/media").status_code == 404
+        assert client.get("/api/jobs/neexistuje/media").status_code == 404
