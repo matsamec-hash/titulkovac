@@ -27,3 +27,12 @@ class CuePatch(BaseModel):
     start: float | None = None
     end: float | None = None
     translations: dict[str, str] | None = None
+
+
+class CueIn(BaseModel):
+    index: int
+    start: float
+    end: float
+    text: str
+    translations: dict[str, str] = {}
+    edited: bool = False

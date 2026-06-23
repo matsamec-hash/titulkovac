@@ -233,3 +233,75 @@ def test_media_missing_returns_404(tmp_path):
         _wait_status(client, job_id, "done")
         assert client.get(f"/api/jobs/{job_id}/media").status_code == 404
         assert client.get("/api/jobs/neexistuje/media").status_code == 404
+
+
+def _seed_cues_runner(cues):
+    def runner(input_path, job_dir, languages, on_progress):
+        save_cues(cues, job_dir / "cues.json")
+        on_progress("done", 100.0)
+    return runner
+
+
+def _create_done_job(client, languages="en"):
+    resp = client.post("/api/jobs",
+                       files={"file": ("ep.mp4", io.BytesIO(b"d"), "video/mp4")},
+                       data={"languages": languages})
+    job_id = resp.json()["id"]
+    _wait_status(client, job_id, "done")
+    return job_id
+
+
+def test_put_cues_roundtrip(tmp_path):
+    runner = _seed_cues_runner([Cue(index=1, start=0.0, end=1.0, text="Ahoj")])
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        job_id = _create_done_job(client)
+        new_cues = [
+            {"index": 1, "start": 0.0, "end": 0.5, "text": "Ahoj",
+             "translations": {"en": "Hi"}, "edited": True},
+            {"index": 2, "start": 0.5, "end": 1.0, "text": "svete",
+             "translations": {}, "edited": True},
+        ]
+        resp = client.put(f"/api/jobs/{job_id}/cues", json=new_cues)
+        assert resp.status_code == 200
+        assert [c["index"] for c in resp.json()] == [1, 2]
+
+        again = client.get(f"/api/jobs/{job_id}/cues").json()
+        assert len(again) == 2
+        assert again[1]["text"] == "svete"
+
+
+def test_put_cues_rejects_empty(tmp_path):
+    runner = _seed_cues_runner([Cue(index=1, start=0.0, end=1.0, text="Ahoj")])
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        job_id = _create_done_job(client)
+        assert client.put(f"/api/jobs/{job_id}/cues", json=[]).status_code == 400
+
+
+def test_put_cues_rejects_non_ascending_index(tmp_path):
+    runner = _seed_cues_runner([Cue(index=1, start=0.0, end=1.0, text="Ahoj")])
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        job_id = _create_done_job(client)
+        bad = [
+            {"index": 2, "start": 0.0, "end": 0.5, "text": "a"},
+            {"index": 1, "start": 0.5, "end": 1.0, "text": "b"},
+        ]
+        assert client.put(f"/api/jobs/{job_id}/cues", json=bad).status_code == 400
+
+
+def test_put_cues_rejects_start_after_end(tmp_path):
+    runner = _seed_cues_runner([Cue(index=1, start=0.0, end=1.0, text="Ahoj")])
+    client, store = _make_client(tmp_path, runner)
+    with client:
+        job_id = _create_done_job(client)
+        bad = [{"index": 1, "start": 2.0, "end": 1.0, "text": "a"}]
+        assert client.put(f"/api/jobs/{job_id}/cues", json=bad).status_code == 400
+
+
+def test_put_cues_unknown_job_404(tmp_path):
+    client, store = _make_client(tmp_path, lambda *a: None)
+    with client:
+        body = [{"index": 1, "start": 0.0, "end": 1.0, "text": "a"}]
+        assert client.put("/api/jobs/neexistuje/cues", json=body).status_code == 404
