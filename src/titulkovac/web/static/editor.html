@@ -42,6 +42,8 @@
     let cues = [];
     let job = null;
     let currentLang = null;  // null = jen cs
+    let lastActive = -1;
+    let userScrollAt = 0;
 
     async function load() {
       try {
@@ -49,7 +51,7 @@
         if (!jr.ok) throw new Error(`HTTP ${jr.status}`);
         job = await jr.json();
         langSel.innerHTML = `<option value="">— (jen cs)</option>` +
-          job.languages.map((l) => `<option value="${l}">${l}</option>`).join("");
+          job.languages.map((l) => `<option value="${escapeHtml(l)}">${escapeHtml(l)}</option>`).join("");
         if (job.languages.length) { langSel.value = job.languages[0]; currentLang = job.languages[0]; }
         const cr = await fetch(`/api/jobs/${jobId}/cues`);
         if (!cr.ok) { msg.textContent = `Titulky nejsou hotové (${cr.status})`; return; }
@@ -61,6 +63,7 @@
     }
 
     function render() {
+      lastActive = -1;
       document.getElementById("th-tr").textContent =
         currentLang ? `překlad (${currentLang})` : "překlad";
       tbody.innerHTML = "";
@@ -77,7 +80,7 @@
         <td class="tc">${formatTimecode(cue.end)}</td>
         <td><textarea class="cell" rows="2" data-field="text">${escapeHtml(cue.text)}</textarea></td>
         <td><textarea class="cell" rows="2" data-field="tr"
-             ${currentLang ? "" : "disabled"}>${escapeHtml(currentLang ? (cue.translations[currentLang] || "") : "")}</textarea></td>
+             ${currentLang ? "" : "disabled"}>${escapeHtml(currentLang ? (cue.translations?.[currentLang] || "") : "")}</textarea></td>
         <td>
           <button data-act="split">rozdělit</button>
           <button data-act="merge">sloučit ↓</button>
@@ -104,7 +107,7 @@
       if (!r.ok) { msg.textContent = `PATCH chyba ${r.status}`; return; }
       msg.textContent = "";
       if (field === "text") cues[i].text = value;
-      else cues[i].translations[currentLang] = value;
+      else (cues[i].translations ??= {})[currentLang] = value;
       cues[i].edited = true;
     }
 
@@ -121,7 +124,7 @@
     }
 
     function doSplit(i, textArea) {
-      const pos = textArea.selectionStart || Math.floor(cues[i].text.length / 2);
+      const pos = textArea.selectionStart ?? Math.floor(cues[i].text.length / 2);
       const parts = splitCueAtChar(cues[i], pos);
       if (parts.length < 2) { msg.textContent = "Tady nelze rozdělit (kurzor na okraji?)."; return; }
       cues.splice(i, 1, parts[0], parts[1]);
@@ -135,14 +138,16 @@
       putAll();
     }
 
+    window.addEventListener("scroll", () => { userScrollAt = performance.now(); }, { passive: true });
     audio.addEventListener("timeupdate", () => {
       const t = audio.currentTime;
       const active = cues.findIndex((c) => t >= c.start && t < c.end);
-      [...tbody.children].forEach((tr, i) => {
-        const on = i === active;
-        tr.classList.toggle("active", on);
-        if (on) tr.scrollIntoView({ block: "nearest" });
-      });
+      if (active === lastActive) return;
+      lastActive = active;
+      [...tbody.children].forEach((tr, i) => tr.classList.toggle("active", i === active));
+      if (active >= 0 && performance.now() - userScrollAt > 4000) {
+        tbody.children[active]?.scrollIntoView({ block: "nearest" });
+      }
     });
 
     langSel.addEventListener("change", () => { currentLang = langSel.value || null; render(); });
