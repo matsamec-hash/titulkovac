@@ -305,3 +305,17 @@ def test_put_cues_unknown_job_404(tmp_path):
     with client:
         body = [{"index": 1, "start": 0.0, "end": 1.0, "text": "a"}]
         assert client.put("/api/jobs/neexistuje/cues", json=body).status_code == 404
+
+
+def test_serves_index_html(tmp_path):
+    client, store = _make_client(tmp_path, lambda *a: None)
+    with client:
+        r = client.get("/")
+        assert r.status_code == 200
+        assert "Titulkov" in r.text
+
+
+def test_api_takes_precedence_over_static(tmp_path):
+    client, store = _make_client(tmp_path, lambda *a: None)
+    with client:
+        assert client.get("/api/jobs").status_code == 200

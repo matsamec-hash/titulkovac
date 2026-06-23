@@ -7,6 +7,7 @@ from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
 from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from titulkovac.export import to_srt, to_vtt
 from titulkovac.models import Cue
@@ -193,5 +194,8 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
             subs = subscribers.get(job_id, [])
             if q in subs:
                 subs.remove(q)
+
+    static_dir = Path(__file__).parent / "static"
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app
