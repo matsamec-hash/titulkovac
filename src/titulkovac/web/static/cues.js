@@ -19,16 +19,24 @@ export function splitCueAtChar(cue, charPos) {
   const text = cue.text;
   const n = text.length;
   const pos = Math.max(1, Math.min(charPos, n - 1));
+  const textA = text.slice(0, pos).trim();
+  const textB = text.slice(pos).trim();
+  // Guard: if either half is empty after trim, do not split — return original
+  // cue unchanged so the caller can treat it as "not splittable".
+  if (!textA || !textB) return [{ ...cue }];
   const ratio = pos / n;
   const tMid = cue.start + (cue.end - cue.start) * ratio;
+  // Part A keeps original translations as a seed for re-checking; part B starts
+  // with empty translations ({}) because it will need independent re-translation.
+  // Both are marked edited:true so the user reviews them before export.
   const a = {
     index: cue.index, start: cue.start, end: tMid,
-    text: text.slice(0, pos).trim(),
+    text: textA,
     translations: { ...(cue.translations || {}) }, edited: true,
   };
   const b = {
     index: cue.index + 1, start: tMid, end: cue.end,
-    text: text.slice(pos).trim(),
+    text: textB,
     translations: {}, edited: true,
   };
   return [a, b];

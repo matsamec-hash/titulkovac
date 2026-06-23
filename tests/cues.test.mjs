@@ -36,6 +36,13 @@ test("splitCueAtChar clamps out-of-range positions", () => {
   assert.ok(a.text.length >= 1 && b.text.length >= 1);
 });
 
+test("splitCueAtChar refuses to split when a half would be empty", () => {
+  const cue = { index: 1, start: 0, end: 10, text: "a", translations: {} };
+  const out = splitCueAtChar(cue, 1);
+  assert.equal(out.length, 1);
+  assert.equal(out[0].text, "a");
+});
+
 test("mergeCues joins text/time/translations", () => {
   const a = { index: 1, start: 0, end: 2, text: "Ahoj", translations: { en: "Hi" } };
   const b = { index: 2, start: 2, end: 4, text: "svete", translations: { en: "world" } };
