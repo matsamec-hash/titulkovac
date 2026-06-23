@@ -90,3 +90,16 @@ REST API:
 - WebSocket `GET /api/jobs/{id}/progress` → JSON `{step, pct}`
 
 Data (nahrane soubory + mezikroky + job.json) jsou v `./data/jobs/` (zmen `TITULKOVAC_DATA`).
+
+## Frontend / náhled v prohlížeči
+
+Po spuštění `titulkovac-web` otevři `http://127.0.0.1:8000/`:
+
+- **Úvodní stránka** — nahraj epizodu, vyber cílové jazyky (CS je vždy), sleduj průběh.
+- **Editor** (`Otevřít editor` u hotové úlohy) — přehrávač zvuku + tabulka titulků:
+  - klik na čas = skok v audiu, přehrávaný titulek se zvýrazní,
+  - editace textu i překladu (uloží se automaticky),
+  - `rozdělit` / `sloučit ↓` pro úpravu dělení,
+  - `Stáhnout SRT/VTT` pro zvolený jazyk.
+
+Frontend je čisté HTML+JS bez buildu (servíruje ho FastAPI ze `web/static/`).
