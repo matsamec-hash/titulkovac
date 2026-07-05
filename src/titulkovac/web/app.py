@@ -6,14 +6,15 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 from fastapi import FastAPI, File, Form, HTTPException, UploadFile, WebSocket, WebSocketDisconnect
-from fastapi.responses import PlainTextResponse
+from fastapi.responses import FileResponse, PlainTextResponse
+from fastapi.staticfiles import StaticFiles
 
 from titulkovac.export import to_srt, to_vtt
 from titulkovac.models import Cue
 from titulkovac.persistence import load_cues, save_cues
 from titulkovac.web.jobs import JobManager, JobStore
 from titulkovac.web.progress import ProgressEvent
-from titulkovac.web.schemas import CueOut, CuePatch, JobOut
+from titulkovac.web.schemas import CueIn, CueOut, CuePatch, JobOut
 
 
 def _job_out(rec) -> JobOut:
@@ -102,6 +103,35 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
         save_cues(cues, cues_path)
         return _cue_out(target)
 
+    @app.put("/api/jobs/{job_id}/cues", response_model=list[CueOut])
+    def put_cues(job_id: str, cues_in: list[CueIn]) -> list[CueOut]:
+        rec = _require_job(store, job_id)
+        cues_path = rec.job_dir / "cues.json"
+        if not cues_path.exists():
+            raise HTTPException(409, "titulky jeste nejsou hotove")
+        if not cues_in:
+            raise HTTPException(400, "prazdny seznam titulku")
+        indices = [c.index for c in cues_in]
+        if any(b <= a for a, b in zip(indices, indices[1:])):
+            raise HTTPException(400, "indexy musi byt vzestupne a unikatni")
+        for c in cues_in:
+            if c.start > c.end:
+                raise HTTPException(400, f"titulek {c.index}: start > end")
+        cues = [Cue(index=c.index, start=c.start, end=c.end, text=c.text,
+                    translations=dict(c.translations), edited=c.edited)
+                for c in cues_in]
+        save_cues(cues, cues_path)
+        return [_cue_out(c) for c in cues]
+
+    @app.get("/api/jobs/{job_id}/media")
+    def get_media(job_id: str) -> FileResponse:
+        rec = _require_job(store, job_id)
+        audio = rec.job_dir / "audio.wav"
+        if not audio.exists():
+            raise HTTPException(404, "audio jeste neni hotove")
+        # Starlette FileResponse resi HTTP Range (206) automaticky.
+        return FileResponse(audio, media_type="audio/wav")
+
     @app.get("/api/jobs/{job_id}/export", response_class=PlainTextResponse)
     def export(job_id: str, lang: str = "cs", format: str = "srt") -> str:
         rec = _require_job(store, job_id)
@@ -164,5 +194,8 @@ def create_app(store: JobStore, manager: JobManager) -> FastAPI:
             subs = subscribers.get(job_id, [])
             if q in subs:
                 subs.remove(q)
+
+    static_dir = Path(__file__).parent / "static"
+    app.mount("/", StaticFiles(directory=static_dir, html=True), name="static")
 
     return app
